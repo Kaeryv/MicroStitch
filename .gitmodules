@@ -1,0 +1,18 @@
+[submodule "entt"]
+	path = entt
+	url = ./deps/entt/
+[submodule "deps/entt"]
+	path = deps/entt
+	url = https://github.com/skypjack/entt
+[submodule "deps/json"]
+	path = deps/json
+	url = https://github.com/nlohmann/json
+[submodule "deps/raygui"]
+	path = deps/raygui
+	url = https://github.com/raysan5/raygui
+[submodule "deps/raylib"]
+	path = deps/raylib
+	url = https://github.com/raysan5/raylib
+[submodule "deps/uvw"]
+	path = deps/uvw
+	url = https://github.com/skypjack/uvw

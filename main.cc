@@ -107,7 +107,7 @@ struct PhiMap {
   }
   float x, y;
   float w, h;
-  int rotation_deg;
+  float rotation_deg;
   Texture2D tex;
   bool selected = false;
   bool mouse_bound = false;
@@ -156,7 +156,7 @@ PhiMap LoadPhiMapJSON(const char* filename, json d, int id) {
   ImageFlipVertical(&cat);
   Texture2D texture = LoadTextureFromImage(cat);      
   UnloadImage(cat);
-  return (PhiMap) {d["x"], d["y"], d["w"], d["h"], 0, texture, false, false, id};
+  return (PhiMap) {d["x"], d["y"], d["w"], d["h"], d["r"], texture, false, false, id};
 }
 
 
@@ -297,7 +297,7 @@ LoadAll(char* filename, ApplicationState & app) {
     std::string png_filename = e["file"];
     Image bg = LoadImage(png_filename.c_str());
     Texture2D tex = LoadTextureFromImage(bg);
-    app.backgrounds.push_back(PhiMap(e["x"], e["y"], e["w"], e["h"], 0, tex, false, false, 0));
+    app.backgrounds.push_back(PhiMap(e["x"], e["y"], e["w"], e["h"], e["r"], tex, false, false, 0));
     if (e.contains("alpha")) arrput(app.backgrounds_alpha, e["alpha"]);
     else arrput(app.backgrounds_alpha, 0.5);
     app.backgrounds.back().filename = png_filename;
@@ -368,42 +368,44 @@ void SaveAll(char* filename, ApplicationState& app) {
   f << data;
   f.close();
 
-  // Save data
-  std::size_t buffer_size = 4 * sizeof(std::size_t);
-  // Steps images
-  std::size_t imlength = app.steps[0].width*app.steps[0].height;
-  for_range(i, 5) {
-    buffer_size += imlength*4*sizeof(uint8_t);
+  if(app.steps_initialized) {
+    // Save data
+    std::size_t buffer_size = 4 * sizeof(std::size_t);
+    // Steps images
+    std::size_t imlength = app.steps[0].width*app.steps[0].height;
+    for_range(i, 5) {
+      buffer_size += imlength*4*sizeof(uint8_t);
+    }
+    // Segmentations
+    for_range(i, 3) {
+      buffer_size += imlength*sizeof(std::size_t);
+    }
+    uint8_t *buffer = (uint8_t*) malloc(buffer_size);
+    uint8_t *cursor = buffer;
+    std::size_t *buffer_as_sizet = (std::size_t*)buffer;
+    buffer_as_sizet[0] = buffer_size;
+    buffer_as_sizet[1] = app.steps[0].width;
+    buffer_as_sizet[2] = app.steps[0].height;
+    buffer_as_sizet[3] = app.steps[0].format;
+    cursor = (uint8_t*)(buffer_as_sizet + 4);
+    for_range(i, 5) {
+      memcpy(cursor, app.steps[i].data, imlength*4*sizeof(uint8_t));
+      cursor += imlength*4*sizeof(uint8_t);
+    }
+    // Segmentations
+    for_range(i, 3) {
+      memcpy(cursor, app.segmentations[i], imlength*sizeof(std::size_t));
+      cursor += imlength*sizeof(std::size_t);
+    }
+    printf("Writing %lu bytes\n", buffer_size);
+    char * bin_filename = TextReplace(filename, ".json", ".bin");
+    fmt::print("Writing {}.\n\f", bin_filename);
+    FILE *write_ptr = NULL;
+    write_ptr = fopen(bin_filename,"wb");
+    assert(write_ptr);
+    fwrite(buffer, sizeof(uint8_t), buffer_size, write_ptr);
+    fclose(write_ptr);
   }
-  // Segmentations
-  for_range(i, 3) {
-    buffer_size += imlength*sizeof(std::size_t);
-  }
-  uint8_t *buffer = (uint8_t*) malloc(buffer_size);
-  uint8_t *cursor = buffer;
-  std::size_t *buffer_as_sizet = (std::size_t*)buffer;
-  buffer_as_sizet[0] = buffer_size;
-  buffer_as_sizet[1] = app.steps[0].width;
-  buffer_as_sizet[2] = app.steps[0].height;
-  buffer_as_sizet[3] = app.steps[0].format;
-  cursor = (uint8_t*)(buffer_as_sizet + 4);
-  for_range(i, 5) {
-    memcpy(cursor, app.steps[i].data, imlength*4*sizeof(uint8_t));
-    cursor += imlength*4*sizeof(uint8_t);
-  }
-  // Segmentations
-  for_range(i, 3) {
-    memcpy(cursor, app.segmentations[i], imlength*sizeof(std::size_t));
-    cursor += imlength*sizeof(std::size_t);
-  }
-  printf("Writing %lu bytes\n", buffer_size);
-  char * bin_filename = TextReplace(filename, ".json", ".bin");
-  fmt::print("Writing {}.\n\f", bin_filename);
-  FILE *write_ptr = NULL;
-  write_ptr = fopen(bin_filename,"wb");
-  assert(write_ptr);
-  fwrite(buffer, sizeof(uint8_t), buffer_size, write_ptr);
-  fclose(write_ptr);
 }
 
 
@@ -512,6 +514,7 @@ int main(void)
           ImageDrawRectangleLines(&app.steps[i], (Rectangle) {1,1,8,8}, 1, WHITE);
           app.steps_tex[i] = LoadTextureFromImage(app.steps[i]);
        }
+       app.steps_initialized = true;
     }
 
     SetTargetFPS(60);
@@ -554,6 +557,10 @@ int main(void)
               else if (IsKeyDown(KEY_K)) target.h+=0.005;
               else if (IsKeyDown(KEY_L) && IsKeyDown(KEY_LEFT_SHIFT)) target.h-=0.05;
               else if (IsKeyDown(KEY_L)) target.h-=0.005;
+              else if (IsKeyDown(KEY_R) && IsKeyDown(KEY_LEFT_SHIFT)) target.rotation_deg+=0.1;
+              else if (IsKeyDown(KEY_R)) target.rotation_deg+=0.05;
+              else if (IsKeyDown(KEY_T) && IsKeyDown(KEY_LEFT_SHIFT)) target.rotation_deg-=0.1;
+              else if (IsKeyDown(KEY_T)) target.rotation_deg-=0.05;
             }
             if (IsKeyPressed(KEY_P) && app.segmentation_base < app.backgrounds.size()) {
               // Locate the background used as base for segmentation
@@ -579,6 +586,57 @@ int main(void)
                 app.phimap = LoadImageFromTexture(rt.texture);
               ImageFlipVertical(&app.phimap);
               ExportImage(app.phimap, "phimap_new.png");
+              UnloadRenderTexture(rt);
+            }
+            if (IsKeyPressed(KEY_G) && app.segmentation_base < app.backgrounds.size()) {
+              // Locate the background used as base for segmentation
+              PhiMap & bg = app.backgrounds[app.segmentation_base];
+              float x0=bg.x, y0=bg.y, w0=bg.w, h0 = bg.h;
+              int mul = 1;
+              if (IsKeyDown(KEY_LEFT_SHIFT)) mul = 4;
+              int px = mul * bg.tex.width, py=mul * bg.tex.height;
+              // Generate and save the phimap
+              RenderTexture2D rt = LoadRenderTexture(px, py);
+              BeginTextureMode(rt);
+              ClearBackground(BLACK);
+              Color bgcolors[3];
+              bgcolors[0] = {255,0,0,255};
+              bgcolors[1] = {0,255,0,128};
+              bgcolors[2] = {0,0,255, 85};
+              for(int i = 0; i < app.backgrounds.size(); i++) {
+                PhiMap im = app.backgrounds[i];
+                Rectangle dest = {(float) px*(im.x-x0)/w0, (float) py*(im.y-y0)/h0, (float) px*im.w*2*app.global_scale/w0, (float) py*im.h*2*app.global_scale/h0};
+                Image bg1 = LoadImageFromTexture(im.tex);
+                ImageColorGrayscale(&bg1);
+                Texture2D bg1tex = LoadTextureFromImage(bg1);
+                DrawTexturePro(bg1tex, {0.f, 0.f, (float) im.tex.width, (float) im.tex.height}, dest, {0.f,0.f}, im.rotation_deg, bgcolors[i]);
+              }
+              EndTextureMode();
+              if (app.phimap.data == nullptr)
+                app.phimap = LoadImageFromTexture(rt.texture);
+              else {
+                UnloadImage(app.phimap);
+                app.phimap = LoadImageFromTexture(rt.texture);
+              }
+              unsigned char maxval[3] = {0,0,0};
+              for(int i = 0; i < app.phimap.width*app.phimap.height; i++) {
+                for (int j = 0; j < 3; j++) {
+                  int cur = ((unsigned char*) app.phimap.data)[i*4+j];
+                  maxval[j] = cur > maxval[j] ? cur : maxval[j];
+                }
+              }
+              printf("Maxvals %d %d %d\n", maxval[0], maxval[1], maxval[2]);
+              for(int i = 0; i < app.phimap.width*app.phimap.height; i++) {
+                for (int j = 0; j < 3; j++) {
+                  unsigned char& cur = ((unsigned char*) app.phimap.data)[i*4+j];
+                  cur = round((255 * cur) / (float) maxval[j]) ;
+                }
+                unsigned char& cur = ((unsigned char*) app.phimap.data)[i*4+3];
+                cur = 255;
+              }
+              printf("Image format: %d\n", app.phimap.format);
+              ImageFlipVertical(&app.phimap);
+              ExportImage(app.phimap, "compound_background.png");
               UnloadRenderTexture(rt);
             }
             // Objects under left-clicked cursor are mouse-bound.
@@ -951,14 +1009,14 @@ int main(void)
                 color = {255,255,255, 128};
                 for (int i = 0; i < app.backgrounds.size(); i++) {
                   PhiMap& target = app.backgrounds[i];
-                  DrawTexturePro(target.tex, {0.f, 0.f, (float) target.tex.width, (float) target.tex.height}, {target.x, target.y, target.w, target.h}, {0.f,0.f}, 0.0, {255,255,255, (uint8_t) (255*app.backgrounds_alpha[i])});
+                  DrawTexturePro(target.tex, {0.f, 0.f, (float) target.tex.width, (float) target.tex.height}, {target.x, target.y, target.w, target.h}, {0.f,0.f}, target.rotation_deg, {255,255,255, (uint8_t) (255*app.backgrounds_alpha[i])});
                 }
                 PhiMap& target = app.backgrounds[app.background_cur];
                 DrawRectangleLinesEx((Rectangle) {target.x, target.y, target.w, target.h}, 0.05, RED);
               }
               else if (app.background_cur < app.backgrounds.size()) {
                 PhiMap& bg = app.backgrounds[app.background_cur];
-                DrawTexturePro(bg.tex, {0.f, 0.f, (float) bg.tex.width, (float) bg.tex.height}, {bg.x, bg.y, bg.w, bg.h}, {0.f,0.f}, 0.0, color);
+                DrawTexturePro(bg.tex, {0.f, 0.f, (float) bg.tex.width, (float) bg.tex.height}, {bg.x, bg.y, bg.w, bg.h}, {0.f,0.f}, bg.rotation_deg, color);
               }
               if (!app.background_edit) {
                 for(int i = 0; i < app.images.size(); i++) {
